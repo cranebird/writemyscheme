@@ -52,6 +52,20 @@ interp :: Env -> ScmExp -> ErrorT ScmError IO ScmExp
 interp env x | selfEvaluating x = return x
 interp env (ScmSymbol "quote" `ScmCons` x `ScmCons` ScmEmptyList) = return x
 interp env (ScmSymbol id) = getVar env id
+-- car, cdr, cons
+interp env (ScmSymbol "cons" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = 
+  return $ x `ScmCons` y
+interp env (ScmSymbol "car" `ScmCons` x `ScmCons` ScmEmptyList) = do
+  x' <- interp env x
+  case x' of
+    a `ScmCons` _ -> return a
+    _ -> throwError $ ScmTypeMismatch "cons" x
+interp env (ScmSymbol "cdr" `ScmCons` x `ScmCons` ScmEmptyList) = do
+  x' <- interp env x
+  case x' of
+    _ `ScmCons` b -> return b
+    _ -> throwError $ ScmTypeMismatch "cons" x
+
 interp env (ScmSymbol "+" `ScmCons` operand) = numericBinOp env (+) operand
 interp env (ScmSymbol "-" `ScmCons` operand) = numericBinOp env (-) operand
 interp env (ScmSymbol "*" `ScmCons` operand) = numericBinOp env (*) operand
@@ -63,6 +77,7 @@ interp env (ScmSymbol "=" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
   x' <- interp env x
   y' <- interp env y
   return $ ScmBool (x' == y')
+--  
 interp env (ScmSymbol "define" `ScmCons` ScmSymbol var `ScmCons`
             form `ScmCons` ScmEmptyList) =
   interp env form >>= defineVar env var

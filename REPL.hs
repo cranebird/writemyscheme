@@ -30,16 +30,30 @@ main = repl2
 -- repl :: IO () 
 repl = H.runInputT H.defaultSettings loop
 
+-- loop :: H.InputT IO ()
+-- loop = do
+--   minput <- H.getInputLine "REPL>>> "
+--   case minput of
+--     Nothing -> return ()
+--     Just "quit" -> return ()
+--     Just "" -> loop
+--     Just input -> do
+--       readAndEval input
+--       loop
+
 loop :: H.InputT IO ()
-loop = do
-  minput <- H.getInputLine "REPL>>> "
-  case minput of
-    Nothing -> return ()
-    Just "quit" -> return ()
-    Just "" -> loop
-    Just input -> do
-      readAndEval input
-      loop
+loop = undefined
+
+-- loop' env = do
+--   minput <- H.getInputLine "REPL>>> "
+--   case minput of
+--     Nothing -> return ()
+--     Just "quit" -> return ()
+--     Just "" -> loop
+--     Just input -> do
+--       readAndEval input
+--       loop'
+
 
 readAndEval :: MonadIO m => String -> H.InputT m ()
 readAndEval str = case (readExp str) of
