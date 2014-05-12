@@ -7,9 +7,15 @@ module Type (
   showCons,
   ThrowsError,
   ScmError(..),
+  Env,
+  nullEnv,
+  ScmIOThrowsError,
+  liftThrows,
+  runIOThrows  
   ) where
 import Control.Monad.Error
 import Text.ParserCombinators.Parsec hiding (spaces)
+import Data.IORef
 
 -- TODO; check R7RS 7.1.3 
 data ScmExp = ScmInt Int | ScmBool Bool
@@ -64,9 +70,6 @@ showExp' (ScmChar a) = "ScmChar " ++ show a
 showExp' (ScmString s) = "ScmString " ++ s
 showExp' ScmEmptyList = "ScmEmptyList"
 
-
-
-
 showCons a = step1 a ""
   where
     step1 x res = step2 x (res ++ "(")
@@ -114,3 +117,21 @@ trapError action = catchError action (return . show)
 
 extractValue :: ThrowsError a -> a
 extractValue (Right val) = val
+
+type ScmIOThrowsError = ErrorT ScmError IO
+
+liftThrows :: MonadError e m => Either e a -> m a
+liftThrows (Left err) = throwError err
+liftThrows (Right val) = return val
+
+runIOThrows :: Monad m => ErrorT ScmError m String -> m String
+runIOThrows action = runErrorT (trapError action) >>= return . extractValue
+
+-- Environment
+type Env = IORef [(String, IORef ScmExp)]
+
+-- nullEnv :: IO Env
+nullEnv = newIORef []
+
+-- testx :: IO (ScmIOThrowsError ScmExp)
+

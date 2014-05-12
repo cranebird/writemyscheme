@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 ----------------------------------------------------------------
 -- Read.hs - Read S-Expression
 ----------------------------------------------------------------
@@ -5,11 +6,10 @@ module Read (
   readExp) where       
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Control.Monad.Error
-
 import Type
 
-readExp :: String -> ThrowsError ScmExp
-readExp input = case parse parseExpr "lisp" input of
+readExp :: MonadError ScmError m => String -> m ScmExp
+readExp input = case parse parseExp "lisp" input of
   Left err -> throwError $ ScmParserError err
   Right x -> return x
 
@@ -44,7 +44,7 @@ parseSymbol = do
     "#f" -> ScmBool False
     _ -> ScmSymbol name
     
--- -- TODO; parse negative number
+-- TODO; parse negative number
 parseNumber :: Parser ScmExp
 parseNumber = do
   spaces0
@@ -53,25 +53,26 @@ parseNumber = do
 
 parseList :: Parser ScmExp
 parseList = do
-  elts <- many parseExpr
+  elts <- many parseExp
   return $ foldr ScmCons ScmEmptyList elts
 
+--
 parseDotted :: Parser ScmExp
 parseDotted = do
-  elts <- many1 parseExpr
+  elts <- many1 parseExp
   char '.'
   spaces
-  tailPart <- parseExpr
+  tailPart <- parseExp
   return $ foldr ScmCons tailPart elts
 
 parseQuoted :: Parser ScmExp
 parseQuoted = do
   char '\''
-  x <- parseExpr
+  x <- parseExp
   return $ ScmCons (ScmSymbol "quote") (ScmCons x ScmEmptyList)
 
-parseExpr :: Parser ScmExp
-parseExpr = do
+parseExp :: Parser ScmExp
+parseExp = do
   spaces0
   res <- try parseSymbol
          <|> try parseString
