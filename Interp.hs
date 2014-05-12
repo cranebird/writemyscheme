@@ -51,6 +51,7 @@ interpString env exp =
 interp :: Env -> ScmExp -> ErrorT ScmError IO ScmExp
 interp env x | selfEvaluating x = return x
 interp env (ScmSymbol "quote" `ScmCons` x `ScmCons` ScmEmptyList) = return x
+interp env (ScmSymbol id) = getVar env id
 interp env (ScmSymbol "+" `ScmCons` operand) = numericBinOp env (+) operand
 interp env (ScmSymbol "-" `ScmCons` operand) = numericBinOp env (-) operand
 interp env (ScmSymbol "*" `ScmCons` operand) = numericBinOp env (*) operand
@@ -62,6 +63,12 @@ interp env (ScmSymbol "=" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
   x' <- interp env x
   y' <- interp env y
   return $ ScmBool (x' == y')
+interp env (ScmSymbol "define" `ScmCons` ScmSymbol var `ScmCons`
+            form `ScmCons` ScmEmptyList) =
+  interp env form >>= defineVar env var
+interp env (ScmSymbol "set!" `ScmCons` ScmSymbol var `ScmCons`
+            form `ScmCons` ScmEmptyList) =
+  interp env form >>= setVar env var
 
 interpOperand :: Env -> ScmExp -> ErrorT ScmError IO [ScmExp]  
 interpOperand env x = mapM (interp env) (toList x)
