@@ -25,7 +25,7 @@ setVar :: (MonadIO m, MonadError ScmError m) =>
 setVar envRef var value = do
   env <- liftIO $ readIORef envRef
   maybe (throwError $ ScmUnboundVar "Getting an unbound variable: " var)
-    (liftIO . (flip writeIORef value))
+    (liftIO . (`writeIORef` value))
     (lookup var env)
   return value
 
@@ -46,7 +46,7 @@ interpAndPrint :: Env -> String -> IO ()
 interpAndPrint env exp = interpString env exp >>= putStrLn
 
 interpString env exp = 
-  runIOThrows $ liftM show $ (liftThrows $ readExp exp) >>= interp env
+  runIOThrows $ liftM show $ liftThrows (readExp exp) >>= interp env
 
 interp :: Env -> ScmExp -> ErrorT ScmError IO ScmExp
 interp env x | selfEvaluating x = return x
@@ -66,7 +66,7 @@ interp env (ScmSymbol "car" `ScmCons` x `ScmCons` ScmEmptyList) = do
     a `ScmCons` _ -> return a
     _ -> throwError $ ScmTypeMismatch "cons" x
     
-interp _ (ScmSymbol "car" `ScmCons` operand) = do
+interp _ (ScmSymbol "car" `ScmCons` operand) =
   throwError $ ScmNumArgsError 1 operand
     
 interp env (ScmSymbol "cdr" `ScmCons` x `ScmCons` ScmEmptyList) = do
@@ -80,10 +80,12 @@ interp _ (ScmSymbol "cdr" `ScmCons` operand) =
 interp env (ScmSymbol "+" `ScmCons` operand) = numericBinOp env (+) operand
 interp env (ScmSymbol "-" `ScmCons` operand) = numericBinOp env (-) operand
 interp env (ScmSymbol "*" `ScmCons` operand) = numericBinOp env (*) operand
+
 interp env (ScmSymbol ">" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
   x' <- interp env x
   y' <- interp env y
   liftM2 (\a b -> ScmBool (a > b)) (unpackNum x') (unpackNum y')
+
 interp env (ScmSymbol "=" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
   x' <- interp env x
   y' <- interp env y
@@ -95,7 +97,22 @@ interp env (ScmSymbol "define" `ScmCons` ScmSymbol var `ScmCons`
 interp env (ScmSymbol "set!" `ScmCons` ScmSymbol var `ScmCons`
             form `ScmCons` ScmEmptyList) =
   interp env form >>= setVar env var
+-- Equal?
 
+eqv :: ScmExp -> ThrowsError ScmExp
+eqv (ScmBool a1 `ScmCons` ScmBool a2 `ScmCons` ScmEmptyList) =
+  return $ ScmBool $ a1 == a2
+eqv (ScmInt a1 `ScmCons` ScmInt a2 `ScmCons` ScmEmptyList) =
+  return $ ScmBool $ a1 == a2
+eqv (ScmString a1 `ScmCons` ScmString a2 `ScmCons` ScmEmptyList) =  
+  return $ ScmBool $ a1 == a2
+eqv (ScmSymbol a1 `ScmCons` ScmSymbol a2 `ScmCons` ScmEmptyList) =  
+  return $ ScmBool $ a1 == a2
+  
+-- TODO compare cons, list
+
+
+--
 interpOperand :: Env -> ScmExp -> ErrorT ScmError IO [ScmExp]  
 interpOperand env x = mapM (interp env) (toList x)
 
