@@ -98,19 +98,32 @@ interp env (ScmSymbol "set!" `ScmCons` ScmSymbol var `ScmCons`
             form `ScmCons` ScmEmptyList) =
   interp env form >>= setVar env var
 -- Equal?
+interp env (ScmSymbol "eq?" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
+  x' <- interp env x
+  y' <- interp env y
+  case eqv x' y' of
+    Right z -> return z
+    Left err -> throwError err
+interp env (ScmSymbol "eq?" `ScmCons` operand) =
+  throwError $ ScmNumArgsError 2 operand
 
-eqv :: ScmExp -> ThrowsError ScmExp
-eqv (ScmBool a1 `ScmCons` ScmBool a2 `ScmCons` ScmEmptyList) =
-  return $ ScmBool $ a1 == a2
-eqv (ScmInt a1 `ScmCons` ScmInt a2 `ScmCons` ScmEmptyList) =
-  return $ ScmBool $ a1 == a2
-eqv (ScmString a1 `ScmCons` ScmString a2 `ScmCons` ScmEmptyList) =  
-  return $ ScmBool $ a1 == a2
-eqv (ScmSymbol a1 `ScmCons` ScmSymbol a2 `ScmCons` ScmEmptyList) =  
-  return $ ScmBool $ a1 == a2
-  
--- TODO compare cons, list
 
+eqv :: ScmExp -> ScmExp -> ThrowsError ScmExp
+eqv (ScmInt a1) (ScmInt a2) = return $ ScmBool $ a1 == a2
+eqv (ScmBool a1) (ScmBool a2) = return $ ScmBool $ a1 == a2
+eqv (ScmCons a1 b1) (ScmCons a2 b2) = 
+  return $ ScmBool $ a1 `eqv'` a2 && b1 `eqv'` b2
+  where
+    eqv' x y = case eqv x y of
+      Left err -> False
+      Right (ScmBool val) -> val
+      Right z -> False
+eqv (ScmCons _ _) ScmEmptyList = return $ ScmBool False
+eqv ScmEmptyList (ScmCons _ _) = return $ ScmBool False
+eqv (ScmSymbol a1) (ScmSymbol a2) = return $ ScmBool $ a1 == a2
+eqv (ScmChar a1) (ScmChar a2) = return $ ScmBool $ a1 == a2
+eqv (ScmString a1) (ScmString a2) = return $ ScmBool $ a1 == a2
+eqv ScmEmptyList ScmEmptyList = return $ ScmBool True
 
 --
 interpOperand :: Env -> ScmExp -> ErrorT ScmError IO [ScmExp]  
