@@ -21,11 +21,23 @@ import Data.IORef
 data ScmExp = ScmInt Int | ScmBool Bool
             | ScmCons { car :: ScmExp, cdr :: ScmExp }
             | ScmSymbol String | ScmChar Char | ScmString String
-            | ScmEmptyList deriving (Eq)
---            | ScmNumber Int
---            | ScmQuote ScmExp
+            | ScmEmptyList 
+            | PrimitiveFunc (ScmExp -> ThrowsError ScmExp)
+--              deriving (Eq)
+-- | ScmNumber Int
+-- | ScmQuote ScmExp
 -- ScmVector [ScmType] | ScmByteVector ? | ScmProc ? | 
 -- ScmRecord ? | ScmPort
+
+instance Eq ScmExp where
+  ScmInt x == ScmInt y = x == y
+  ScmBool x == ScmBool y = x == y
+  ScmCons x x' == ScmCons y y' = x == y && x' == y'
+  ScmSymbol x == ScmSymbol y = x == y
+  ScmChar x == ScmChar y = x == y
+  ScmString x == ScmString y = x == y
+  ScmEmptyList == ScmEmptyList = True
+  PrimitiveFunc x == PrimitiveFunc y = False
 
 instance Show ScmExp where
   show = showExp
@@ -57,6 +69,7 @@ showExp (ScmSymbol a) = a
 showExp (ScmChar a) = show a
 showExp (ScmString s) = "\"" ++ s ++ "\""
 showExp ScmEmptyList = "()"
+showExp (PrimitiveFunc _) = "<primitive>"
 -- showExp (ScmNumber a) = show a
 
 -- show simple
