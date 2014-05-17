@@ -5,6 +5,7 @@ module Main
 where
 import qualified System.Console.Haskeline as H
 import Control.Monad.Error
+import Control.Monad.IO.Class
 import Type
 import Read
 import Interp
@@ -55,8 +56,8 @@ loop = undefined
 --       loop'
 
 
-readAndEval :: MonadIO m => String -> H.InputT m ()
-readAndEval str = case (readExp str) of
+--readAndEval :: Control.Monad.IO.Class.MonadIO m => String -> H.InputT m ()
+readAndEval str = case readExp str of
   Left err -> H.outputStrLn (show err)
   Right v -> H.outputStrLn (show v)
 
