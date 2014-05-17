@@ -4,13 +4,18 @@ module Interp (
   interpAndPrint
   ) where
 import Type
+import Control.Monad
 import Control.Monad.Error
 import Data.IORef
+import Data.Maybe
+
 import Read
 
 isBound :: Env -> String -> IO Bool
+-- isBound envRef var = 
+--   readIORef envRef >>= return . maybe False (const True) . lookup var
 isBound envRef var = 
-  readIORef envRef >>= return . maybe False (const True) . lookup var
+  liftM (isJust . lookup var) (readIORef envRef)
 
 getVar :: (MonadIO m, MonadError ScmError m) =>
           Env -> String -> m ScmExp
@@ -43,15 +48,34 @@ defineVar envRef var value = do
     return value
 
 interpAndPrint :: Env -> String -> IO ()
-interpAndPrint env exp = interpString env exp >>= putStrLn
+interpAndPrint env e = interpString env e >>= putStrLn
 
-interpString env exp = 
-  runIOThrows $ liftM show $ liftThrows (readExp exp) >>= interp env
+interpString env e = 
+  runIOThrows $ liftM show $ liftThrows (readExp e) >>= interp env
+
+primitives = [("+",
+               \env operand -> do
+                 args <- interpOperand env operand
+                 args' <- mapM unpackNum args
+                 return $ ScmInt (foldl1 (+) args'))]
+
+
+apply :: String -> Env -> [ScmExp] -> ThrowsError ScmExp
+apply f env args = case lookup f primitives of
+  Nothing -> throwError $ ScmNotFunction "Unrecognized primitive" f
+--  Just op -> _ TODO
 
 interp :: Env -> ScmExp -> ErrorT ScmError IO ScmExp
 interp env x | selfEvaluating x = return x
 interp env (ScmSymbol "quote" `ScmCons` x `ScmCons` ScmEmptyList) = return x
 interp env (ScmSymbol id) = getVar env id
+
+-- apply ver.
+interp env (ScmSymbol f `ScmCons` operand `ScmCons` ScmEmptyList) = do
+  args <- interpOperand env operand
+  case (apply f env args) of
+    Right x -> return x
+    Left err -> throwError err
 
 -- car, cdr, cons
 interp env (ScmSymbol "cons" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = 
@@ -59,7 +83,6 @@ interp env (ScmSymbol "cons" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) =
     x' <- interp env x
     y' <- interp env y
     return $ x' `ScmCons` y'
-    
 interp env (ScmSymbol "car" `ScmCons` x `ScmCons` ScmEmptyList) = do
   x' <- interp env x
   case x' of
@@ -106,7 +129,6 @@ interp env (ScmSymbol "eq?" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
     Left err -> throwError err
 interp env (ScmSymbol "eq?" `ScmCons` operand) =
   throwError $ ScmNumArgsError 2 operand
-
 
 eqv :: ScmExp -> ScmExp -> ThrowsError ScmExp
 eqv (ScmInt a1) (ScmInt a2) = return $ ScmBool $ a1 == a2
