@@ -13,8 +13,14 @@ module Type (
   liftThrows,
   runIOThrows  
   ) where
+--ok but warn
+-- import Control.Monad.Error
+-- import Control.Monad.Error.Class 
+
 import Control.Monad.Error
-import Text.ParserCombinators.Parsec hiding (spaces)
+import Control.Monad.Trans.Except
+
+import Text.ParserCombinators.Parsec
 import Data.IORef
 
 -- TODO; check R7RS 7.1.3 
@@ -37,7 +43,7 @@ instance Eq ScmExp where
   ScmChar x == ScmChar y = x == y
   ScmString x == ScmString y = x == y
   ScmEmptyList == ScmEmptyList = True
-  PrimitiveFunc x == PrimitiveFunc y = False
+  PrimitiveFunc _ == PrimitiveFunc _ = False
 
 instance Show ScmExp where
   show = showExp
