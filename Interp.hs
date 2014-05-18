@@ -53,17 +53,16 @@ interpAndPrint env e = interpString env e >>= putStrLn
 interpString env e = 
   runIOThrows $ liftM show $ liftThrows (readExp e) >>= interp env
 
-primitives = [("+",
-               \env operand -> do
-                 args <- interpOperand env operand
-                 args' <- mapM unpackNum args
-                 return $ ScmInt (foldl1 (+) args'))]
+primitives = [("+", numericBinOp (+)),
+              ("-", numericBinOp (-)),
+              ("*", numericBinOp (*))
+              -- TODO
+             ]
 
-
-apply :: String -> Env -> [ScmExp] -> ThrowsError ScmExp
+apply :: String -> Env -> ScmExp -> ErrorT ScmError IO ScmExp
 apply f env args = case lookup f primitives of
   Nothing -> throwError $ ScmNotFunction "Unrecognized primitive" f
---  Just op -> _ TODO
+  Just op -> op env args
 
 interp :: Env -> ScmExp -> ErrorT ScmError IO ScmExp
 interp env x | selfEvaluating x = return x
@@ -71,48 +70,44 @@ interp env (ScmSymbol "quote" `ScmCons` x `ScmCons` ScmEmptyList) = return x
 interp env (ScmSymbol id) = getVar env id
 
 -- apply ver.
-interp env (ScmSymbol f `ScmCons` operand `ScmCons` ScmEmptyList) = do
-  args <- interpOperand env operand
-  case (apply f env args) of
-    Right x -> return x
-    Left err -> throwError err
+interp env (ScmSymbol f `ScmCons` operand) = apply f env operand
 
--- car, cdr, cons
-interp env (ScmSymbol "cons" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = 
-  do
-    x' <- interp env x
-    y' <- interp env y
-    return $ x' `ScmCons` y'
-interp env (ScmSymbol "car" `ScmCons` x `ScmCons` ScmEmptyList) = do
-  x' <- interp env x
-  case x' of
-    a `ScmCons` _ -> return a
-    _ -> throwError $ ScmTypeMismatch "cons" x
+-- TODO;
+-- move below to primitvies.
+
+-- -- car, cdr, cons
+-- interp env (ScmSymbol "cons" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = 
+--   do
+--     x' <- interp env x
+--     y' <- interp env y
+--     return $ x' `ScmCons` y'
+-- interp env (ScmSymbol "car" `ScmCons` x `ScmCons` ScmEmptyList) = do
+--   x' <- interp env x
+--   case x' of
+--     a `ScmCons` _ -> return a
+--     _ -> throwError $ ScmTypeMismatch "cons" x
     
-interp _ (ScmSymbol "car" `ScmCons` operand) =
-  throwError $ ScmNumArgsError 1 operand
+-- interp _ (ScmSymbol "car" `ScmCons` operand) =
+--   throwError $ ScmNumArgsError 1 operand
     
-interp env (ScmSymbol "cdr" `ScmCons` x `ScmCons` ScmEmptyList) = do
-  x' <- interp env x
-  case x' of
-    _ `ScmCons` b -> return b
-    _ -> throwError $ ScmTypeMismatch "cons" x
-interp _ (ScmSymbol "cdr" `ScmCons` operand) = 
-  throwError $ ScmNumArgsError 1 operand
+-- interp env (ScmSymbol "cdr" `ScmCons` x `ScmCons` ScmEmptyList) = do
+--   x' <- interp env x
+--   case x' of
+--     _ `ScmCons` b -> return b
+--     _ -> throwError $ ScmTypeMismatch "cons" x
+-- interp _ (ScmSymbol "cdr" `ScmCons` operand) = 
+--   throwError $ ScmNumArgsError 1 operand
 
-interp env (ScmSymbol "+" `ScmCons` operand) = numericBinOp env (+) operand
-interp env (ScmSymbol "-" `ScmCons` operand) = numericBinOp env (-) operand
-interp env (ScmSymbol "*" `ScmCons` operand) = numericBinOp env (*) operand
+-- interp env (ScmSymbol ">" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
+--   x' <- interp env x
+--   y' <- interp env y
+--   liftM2 (\a b -> ScmBool (a > b)) (unpackNum x') (unpackNum y')
 
-interp env (ScmSymbol ">" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
-  x' <- interp env x
-  y' <- interp env y
-  liftM2 (\a b -> ScmBool (a > b)) (unpackNum x') (unpackNum y')
+-- interp env (ScmSymbol "=" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
+--   x' <- interp env x
+--   y' <- interp env y
+--   return $ ScmBool (x' == y')
 
-interp env (ScmSymbol "=" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
-  x' <- interp env x
-  y' <- interp env y
-  return $ ScmBool (x' == y')
 --  
 interp env (ScmSymbol "define" `ScmCons` ScmSymbol var `ScmCons`
             form `ScmCons` ScmEmptyList) =
@@ -151,8 +146,8 @@ eqv ScmEmptyList ScmEmptyList = return $ ScmBool True
 interpOperand :: Env -> ScmExp -> ErrorT ScmError IO [ScmExp]  
 interpOperand env x = mapM (interp env) (toList x)
 
-numericBinOp :: Env -> (Int -> Int -> Int) -> ScmExp -> ErrorT ScmError IO ScmExp
-numericBinOp env op operand =
+numericBinOp :: (Int -> Int -> Int) -> Env -> ScmExp -> ErrorT ScmError IO ScmExp
+numericBinOp op env operand =
   if length (toList operand) /= 2 then
     throwError $ ScmNumArgsError 2 operand
     else
