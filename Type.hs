@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs, ExistentialQuantification #-}
 module Type (
   ScmExp(..),
   consp,
@@ -24,12 +25,13 @@ import Text.ParserCombinators.Parsec
 import Data.IORef
 
 -- TODO; check R7RS 7.1.3 
-data ScmExp = ScmInt Int | ScmBool Bool
+
+data ScmExp = ScmInt Int 
+            | ScmBool Bool
             | ScmCons { car :: ScmExp, cdr :: ScmExp }
             | ScmSymbol String | ScmChar Char | ScmString String
             | ScmEmptyList 
             | PrimitiveFunc (ScmExp -> ThrowsError ScmExp)
---              deriving (Eq)
 -- | ScmNumber Int
 -- | ScmQuote ScmExp
 -- ScmVector [ScmType] | ScmByteVector ? | ScmProc ? | 
@@ -151,6 +153,9 @@ type Env = IORef [(String, IORef ScmExp)]
 
 -- nullEnv :: IO Env
 nullEnv = newIORef []
-
+--
+primitiveBindings :: IO Env
+primitiveBindings = undefined
+--primitiveBindings = nullEnv >>= 
 -- testx :: IO (ScmIOThrowsError ScmExp)
 
