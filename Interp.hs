@@ -12,10 +12,7 @@ import Data.Maybe
 import Read
 
 isBound :: Env -> String -> IO Bool
--- isBound envRef var = 
---   readIORef envRef >>= return . maybe False (const True) . lookup var
-isBound envRef var = 
-  liftM (isJust . lookup var) (readIORef envRef)
+isBound envRef var = liftM (isJust . lookup var) (readIORef envRef)
 
 getVar :: (MonadIO m, MonadError ScmError m) =>
           Env -> String -> m ScmExp
@@ -34,7 +31,6 @@ setVar envRef var value = do
     (lookup var env)
   return value
 
--- defineVar :: Env -> String -> ScmExp -> ScmIOThrowsError ScmExp
 defineVar :: (MonadIO m, MonadError ScmError m) =>
              Env -> String -> ScmExp -> m ScmExp
 defineVar envRef var value = do
@@ -53,69 +49,62 @@ interpAndPrint env e = interpString env e >>= putStrLn
 interpString env e = 
   runIOThrows $ liftM show $ liftThrows (readExp e) >>= interp env
 
+type Primitive = Env -> ScmExp -> ErrorT ScmError IO ScmExp
+primitives :: [(String, Primitive)]
 primitives = [("+", numericBinOp (+)),
               ("-", numericBinOp (-)),
-              ("*", numericBinOp (*))
-              -- TODO
+              ("*", numericBinOp (*)),
+              ("cons", primCons),
+              ("car", primCar),
+              ("cdr", primCdr),
+              (">", numBoolBinOp (>)),
+              ("<", numBoolBinOp (<)),
+              (">=", numBoolBinOp (>=)),
+              ("<=", numBoolBinOp (<=)),
+              ("=", numBoolBinOp (==))
              ]
 
-apply :: String -> Env -> ScmExp -> ErrorT ScmError IO ScmExp
-apply f env args = case lookup f primitives of
-  Nothing -> throwError $ ScmNotFunction "Unrecognized primitive" f
-  Just op -> op env args
+-- cons :: Primitive
+primCons env operand = case operand of
+  (x `ScmCons` y `ScmCons` ScmEmptyList) -> do
+    x' <- interp env x
+    y' <- interp env y
+    return $ x' `ScmCons` y'
+  _ -> throwError $ ScmNumArgsError 2 operand
+  
+primCar env operand = case operand of
+  x `ScmCons` ScmEmptyList -> do
+    x' <- interp env x
+    case x' of
+      a `ScmCons` _ -> return a
+      _ -> throwError $ ScmTypeMismatch "cons" x
+  _ -> throwError $ ScmNumArgsError 1 operand
+
+primCdr env operand = case operand of
+  x `ScmCons` ScmEmptyList -> do
+    x' <- interp env x
+    case x' of
+      _ `ScmCons` b -> return b
+      _ -> throwError $ ScmTypeMismatch "cons" x
+  _ -> throwError $ ScmNumArgsError 1 operand
+
+numBoolBinOp op env operand = case operand of
+  x `ScmCons` y `ScmCons` ScmEmptyList -> do
+    x' <- interp env x
+    y' <- interp env y
+    liftM2 (\a b -> ScmBool (a `op` b)) (unpackNum x') (unpackNum y')    
+  _ -> throwError $ ScmNumArgsError 2 operand
 
 interp :: Env -> ScmExp -> ErrorT ScmError IO ScmExp
 interp env x | selfEvaluating x = return x
 interp env (ScmSymbol "quote" `ScmCons` x `ScmCons` ScmEmptyList) = return x
 interp env (ScmSymbol id) = getVar env id
-
--- apply ver.
-interp env (ScmSymbol f `ScmCons` operand) = apply f env operand
-
--- TODO;
--- move below to primitvies.
-
--- -- car, cdr, cons
--- interp env (ScmSymbol "cons" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = 
---   do
---     x' <- interp env x
---     y' <- interp env y
---     return $ x' `ScmCons` y'
--- interp env (ScmSymbol "car" `ScmCons` x `ScmCons` ScmEmptyList) = do
---   x' <- interp env x
---   case x' of
---     a `ScmCons` _ -> return a
---     _ -> throwError $ ScmTypeMismatch "cons" x
-    
--- interp _ (ScmSymbol "car" `ScmCons` operand) =
---   throwError $ ScmNumArgsError 1 operand
-    
--- interp env (ScmSymbol "cdr" `ScmCons` x `ScmCons` ScmEmptyList) = do
---   x' <- interp env x
---   case x' of
---     _ `ScmCons` b -> return b
---     _ -> throwError $ ScmTypeMismatch "cons" x
--- interp _ (ScmSymbol "cdr" `ScmCons` operand) = 
---   throwError $ ScmNumArgsError 1 operand
-
--- interp env (ScmSymbol ">" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
---   x' <- interp env x
---   y' <- interp env y
---   liftM2 (\a b -> ScmBool (a > b)) (unpackNum x') (unpackNum y')
-
--- interp env (ScmSymbol "=" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
---   x' <- interp env x
---   y' <- interp env y
---   return $ ScmBool (x' == y')
-
---  
 interp env (ScmSymbol "define" `ScmCons` ScmSymbol var `ScmCons`
             form `ScmCons` ScmEmptyList) =
   interp env form >>= defineVar env var
 interp env (ScmSymbol "set!" `ScmCons` ScmSymbol var `ScmCons`
             form `ScmCons` ScmEmptyList) =
   interp env form >>= setVar env var
--- Equal?
 interp env (ScmSymbol "eq?" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
   x' <- interp env x
   y' <- interp env y
@@ -124,6 +113,12 @@ interp env (ScmSymbol "eq?" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
     Left err -> throwError err
 interp env (ScmSymbol "eq?" `ScmCons` operand) =
   throwError $ ScmNumArgsError 2 operand
+interp env (ScmSymbol f `ScmCons` operand) = apply f env operand  
+
+apply :: String -> Env -> ScmExp -> ErrorT ScmError IO ScmExp
+apply f env args = case lookup f primitives of
+  Nothing -> throwError $ ScmNotFunction "Unrecognized primitive" f
+  Just op -> op env args
 
 eqv :: ScmExp -> ScmExp -> ThrowsError ScmExp
 eqv (ScmInt a1) (ScmInt a2) = return $ ScmBool $ a1 == a2
