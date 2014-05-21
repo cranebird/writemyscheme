@@ -50,6 +50,7 @@ interpString env e =
   runIOThrows $ liftM show $ liftThrows (readExp e) >>= interp env
 
 type Primitive = Env -> ScmExp -> ErrorT ScmError IO ScmExp
+
 primitives :: [(String, Primitive)]
 primitives = [("+", numericBinOp (+)),
               ("-", numericBinOp (-)),
