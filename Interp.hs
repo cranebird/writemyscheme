@@ -120,20 +120,20 @@ eval env (ScmSymbol f `ScmCons` operand) = do
   operand' <- evalScmList env operand
   apply f' operand'
 
--- list の長さをかえす
+-- return length of scheme list.
 lengthScmList x = f x 0
   where
     f ScmEmptyList n = n
     f (x `ScmCons` y) n = f y (n + 1)
 
--- list の要素を順に評価する
+-- eval scheme list elements.
 evalScmList env x = f x ScmEmptyList
   where
     f ScmEmptyList acc = return $ reverseScmList acc
     f (x `ScmCons` y) acc = do
       x' <- eval env x
       f y (x' `ScmCons` acc)
--- list を逆順にする
+-- reverse scheme list.
 reverseScmList x = rev x ScmEmptyList
   where
     rev ScmEmptyList acc = acc
