@@ -71,7 +71,7 @@ until_ pred prompt action = do
      then return ()
     else action result >> until_ pred prompt action
 
-repl2 = nullEnv >>= 
-        until_ (== "quit") (readPrompt "REPL>>> ") . interpAndPrint
+repl2 = primitiveBindings >>= 
+        until_ (== "quit") (readPrompt "REPL>>> ") . evalAndPrint
 
 
