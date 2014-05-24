@@ -1,7 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Interp (
-  interp,
-  interpAndPrint
+  eval,
+  evalAndPrint,
+  primitiveBindings
   ) where
 import Type
 import Control.Monad
@@ -42,40 +43,46 @@ defineVar envRef var value = do
     env <- readIORef envRef
     writeIORef envRef ((var, valueRef) : env)
     return value
+    
+bindVars :: Env -> [(String, ScmExp)] -> IO Env
+bindVars envRef bindings = 
+  readIORef envRef >>= extendEnv bindings >>= newIORef
+  where
+    extendEnv bindings env = liftM (++ env) (mapM addBinding bindings)
+    addBinding (var, value) = do
+      ref <- newIORef value
+      return (var, ref)
 
-interpAndPrint :: Env -> String -> IO ()
-interpAndPrint env e = interpString env e >>= putStrLn
+evalAndPrint :: Env -> String -> IO ()
+evalAndPrint env e = evalString env e >>= putStrLn
 
-interpString env e = 
-  runIOThrows $ liftM show $ liftThrows (readExp e) >>= interp env
+evalString env e = 
+  runIOThrows $ liftM show $ liftThrows (readExp e) >>= eval env
 
-type Primitive = Env -> ScmExp -> ErrorT ScmError IO ScmExp
-
-primitives :: [(String, Primitive)]
+primitives :: [(String, ScmExp -> ThrowsError ScmExp)]
 primitives = [("+", numericBinOp (+)),
               ("-", numericBinOp (-)),
               ("*", numericBinOp (*)),
-              ("cons", primCons),
-              ("car", primCar),
-              ("cdr", primCdr),
+              -- ("cons", primCons),
+              -- ("car", primCar),
+              -- ("cdr", primCdr),
               (">", numBoolBinOp (>)),
               ("<", numBoolBinOp (<)),
               (">=", numBoolBinOp (>=)),
               ("<=", numBoolBinOp (<=)),
-              ("=", numBoolBinOp (==))
+              ("=", numBoolBinOp (==)) 
              ]
 
--- cons :: Primitive
 primCons env operand = case operand of
   (x `ScmCons` y `ScmCons` ScmEmptyList) -> do
-    x' <- interp env x
-    y' <- interp env y
+    x' <- eval env x
+    y' <- eval env y
     return $ x' `ScmCons` y'
   _ -> throwError $ ScmNumArgsError 2 operand
   
 primCar env operand = case operand of
   x `ScmCons` ScmEmptyList -> do
-    x' <- interp env x
+    x' <- eval env x
     case x' of
       a `ScmCons` _ -> return a
       _ -> throwError $ ScmTypeMismatch "cons" x
@@ -83,43 +90,56 @@ primCar env operand = case operand of
 
 primCdr env operand = case operand of
   x `ScmCons` ScmEmptyList -> do
-    x' <- interp env x
+    x' <- eval env x
     case x' of
       _ `ScmCons` b -> return b
       _ -> throwError $ ScmTypeMismatch "cons" x
   _ -> throwError $ ScmNumArgsError 1 operand
 
-numBoolBinOp op env operand = case operand of
-  x `ScmCons` y `ScmCons` ScmEmptyList -> do
-    x' <- interp env x
-    y' <- interp env y
-    liftM2 (\a b -> ScmBool (a `op` b)) (unpackNum x') (unpackNum y')    
-  _ -> throwError $ ScmNumArgsError 2 operand
 
-interp :: Env -> ScmExp -> ErrorT ScmError IO ScmExp
-interp env x | selfEvaluating x = return x
-interp env (ScmSymbol "quote" `ScmCons` x `ScmCons` ScmEmptyList) = return x
-interp env (ScmSymbol id) = getVar env id
-interp env (ScmSymbol "define" `ScmCons` ScmSymbol var `ScmCons`
+eval :: Env -> ScmExp -> ErrorT ScmError IO ScmExp
+eval env x | selfEvaluating x = return x
+eval env (ScmSymbol "quote" `ScmCons` x `ScmCons` ScmEmptyList) = return x
+eval env (ScmSymbol id) = getVar env id
+eval env (ScmSymbol "define" `ScmCons` ScmSymbol var `ScmCons`
             form `ScmCons` ScmEmptyList) =
-  interp env form >>= defineVar env var
-interp env (ScmSymbol "set!" `ScmCons` ScmSymbol var `ScmCons`
+  eval env form >>= defineVar env var
+eval env (ScmSymbol "set!" `ScmCons` ScmSymbol var `ScmCons`
             form `ScmCons` ScmEmptyList) =
-  interp env form >>= setVar env var
-interp env (ScmSymbol "eq?" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
-  x' <- interp env x
-  y' <- interp env y
+  eval env form >>= setVar env var
+eval env (ScmSymbol "eq?" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
+  x' <- eval env x
+  y' <- eval env y
   case eqv x' y' of
     Right z -> return z
     Left err -> throwError err
-interp env (ScmSymbol "eq?" `ScmCons` operand) =
+eval env (ScmSymbol "eq?" `ScmCons` operand) =
   throwError $ ScmNumArgsError 2 operand
-interp env (ScmSymbol f `ScmCons` operand) = apply f env operand  
+eval env (ScmSymbol f `ScmCons` operand) = do
+  f' <- eval env (ScmSymbol f)
+  operand' <- evalScmList env operand
+  apply f' operand'
 
-apply :: String -> Env -> ScmExp -> ErrorT ScmError IO ScmExp
-apply f env args = case lookup f primitives of
-  Nothing -> throwError $ ScmNotFunction "Unrecognized primitive" f
-  Just op -> op env args
+-- lisp の list の長さをかえす
+lengthScmList x = f x 0
+  where
+    f ScmEmptyList n = n
+    f (x `ScmCons` y) n = f y (n + 1)
+
+-- lisp の list の要素を順に評価する
+evalScmList env x = f x ScmEmptyList
+  where
+    f ScmEmptyList acc = return $ reverseScmList acc
+    f (x `ScmCons` y) acc = do
+      x' <- eval env x
+      f y (x' `ScmCons` acc)
+-- lisp の list を逆順にする
+reverseScmList x = rev x ScmEmptyList
+  where
+    rev ScmEmptyList acc = acc
+    rev (x `ScmCons` y) acc = rev y (x `ScmCons` acc)
+  
+apply (ScmPrimitiveFunc f) args = liftThrows $ f args
 
 eqv :: ScmExp -> ScmExp -> ThrowsError ScmExp
 eqv (ScmInt a1) (ScmInt a2) = return $ ScmBool $ a1 == a2
@@ -137,20 +157,31 @@ eqv (ScmSymbol a1) (ScmSymbol a2) = return $ ScmBool $ a1 == a2
 eqv (ScmChar a1) (ScmChar a2) = return $ ScmBool $ a1 == a2
 eqv (ScmString a1) (ScmString a2) = return $ ScmBool $ a1 == a2
 eqv ScmEmptyList ScmEmptyList = return $ ScmBool True
-
 --
-interpOperand :: Env -> ScmExp -> ErrorT ScmError IO [ScmExp]  
-interpOperand env x = mapM (interp env) (toList x)
+--
+-- primitiveBindings :: IO Env
+primitiveBindings = 
+  nullEnv >>= flip bindVars (map makePrimitiveFunc primitives)
+  where
+    makePrimitiveFunc (var, f) = (var, ScmPrimitiveFunc f)
 
-numericBinOp :: (Int -> Int -> Int) -> Env -> ScmExp -> ErrorT ScmError IO ScmExp
-numericBinOp op env operand =
-  if length (toList operand) /= 2 then
-    throwError $ ScmNumArgsError 2 operand
-    else
+numericBinOp op args = 
+  if lengthScmList args /= 2 then
+    throwError $ ScmNumArgsError 2 args
+  else
     do
-      args <- interpOperand env operand
-      args'' <- mapM unpackNum args
-      return $ ScmInt (foldl1 op args'')
+      x <- unpackNum (car args)
+      y <- unpackNum (car (cdr args))
+      return $ ScmInt (x `op` y)
+      
+numBoolBinOp op args =
+  if lengthScmList args /= 2 then
+    throwError $ ScmNumArgsError 2 args
+  else
+    do
+      x <- unpackNum (car args)
+      y <- unpackNum (car (cdr args))
+      return $ ScmBool (x `op` y)
 
 unpackNum :: MonadError ScmError m => ScmExp -> m Int
 unpackNum (ScmInt n) = return n
