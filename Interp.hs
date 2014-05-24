@@ -63,39 +63,15 @@ primitives :: [(String, ScmExp -> ThrowsError ScmExp)]
 primitives = [("+", numericBinOp (+)),
               ("-", numericBinOp (-)),
               ("*", numericBinOp (*)),
-              -- ("cons", primCons),
-              -- ("car", primCar),
-              -- ("cdr", primCdr),
+              ("cons", primCons),
+              ("car", primCar),
+              ("cdr", primCdr),
               (">", numBoolBinOp (>)),
               ("<", numBoolBinOp (<)),
               (">=", numBoolBinOp (>=)),
               ("<=", numBoolBinOp (<=)),
               ("=", numBoolBinOp (==)) 
              ]
-
-primCons env operand = case operand of
-  (x `ScmCons` y `ScmCons` ScmEmptyList) -> do
-    x' <- eval env x
-    y' <- eval env y
-    return $ x' `ScmCons` y'
-  _ -> throwError $ ScmNumArgsError 2 operand
-  
-primCar env operand = case operand of
-  x `ScmCons` ScmEmptyList -> do
-    x' <- eval env x
-    case x' of
-      a `ScmCons` _ -> return a
-      _ -> throwError $ ScmTypeMismatch "cons" x
-  _ -> throwError $ ScmNumArgsError 1 operand
-
-primCdr env operand = case operand of
-  x `ScmCons` ScmEmptyList -> do
-    x' <- eval env x
-    case x' of
-      _ `ScmCons` b -> return b
-      _ -> throwError $ ScmTypeMismatch "cons" x
-  _ -> throwError $ ScmNumArgsError 1 operand
-
 
 eval :: Env -> ScmExp -> ErrorT ScmError IO ScmExp
 eval env x | selfEvaluating x = return x
@@ -164,6 +140,23 @@ primitiveBindings =
   nullEnv >>= flip bindVars (map makePrimitiveFunc primitives)
   where
     makePrimitiveFunc (var, f) = (var, ScmPrimitiveFunc f)
+
+primCons args = case args of
+  (x `ScmCons` y `ScmCons` ScmEmptyList) -> return $ x `ScmCons` y
+  _ -> throwError $ ScmNumArgsError 2 args
+
+primCar args = case args of
+  x `ScmCons` ScmEmptyList -> case x of
+    a `ScmCons` _ -> return a
+    _ -> throwError $ ScmTypeMismatch "cons" x
+  _ -> throwError $ ScmNumArgsError 1 args
+
+primCdr args = case args of
+  x `ScmCons` ScmEmptyList -> case x of
+    _ `ScmCons` b -> return b
+    _ -> throwError $ ScmTypeMismatch "cons" x
+  _ -> throwError $ ScmNumArgsError 1 args
+
 
 numericBinOp op args = 
   if lengthScmList args /= 2 then
