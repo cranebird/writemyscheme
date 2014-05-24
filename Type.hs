@@ -31,11 +31,11 @@ data ScmExp = ScmInt Int
             | ScmCons { car :: ScmExp, cdr :: ScmExp }
             | ScmSymbol String | ScmChar Char | ScmString String
             | ScmEmptyList 
-            | PrimitiveFunc (ScmExp -> ThrowsError ScmExp)
--- | ScmNumber Int
--- | ScmQuote ScmExp
--- ScmVector [ScmType] | ScmByteVector ? | ScmProc ? | 
--- ScmRecord ? | ScmPort
+            | ScmPrimitiveFunc (ScmExp -> ThrowsError ScmExp)
+            | ScmFunc { params :: [String],
+                        vararg :: Maybe String,
+                        body :: ScmExp,
+                        closure :: Env }
 
 instance Eq ScmExp where
   ScmInt x == ScmInt y = x == y
@@ -45,7 +45,8 @@ instance Eq ScmExp where
   ScmChar x == ScmChar y = x == y
   ScmString x == ScmString y = x == y
   ScmEmptyList == ScmEmptyList = True
-  PrimitiveFunc _ == PrimitiveFunc _ = False
+  ScmPrimitiveFunc _ == ScmPrimitiveFunc _ = False
+  ScmFunc {} == ScmFunc {} = False
 
 instance Show ScmExp where
   show = showExp
@@ -64,21 +65,33 @@ selfEvaluating x = case x of
   ScmChar _ -> True
   ScmString _ -> True
   _ -> False
-  -- ScmNumber _ -> True
-  -- ScmVector -> True
-  -- ScmByteVector -> True
 
 showExp :: ScmExp -> String
-showExp (ScmInt a) = show a
-showExp (ScmBool True) = "#t"
-showExp (ScmBool False) = "#f"
-showExp a@(ScmCons _ _) = showCons a
-showExp (ScmSymbol a) = a
-showExp (ScmChar a) = show a
-showExp (ScmString s) = "\"" ++ s ++ "\""
-showExp ScmEmptyList = "()"
-showExp (PrimitiveFunc _) = "<primitive>"
--- showExp (ScmNumber a) = show a
+showExp x = case x of
+  ScmInt n -> show n
+  ScmBool True -> "#t"
+  ScmBool False -> "#f"
+  ScmCons _ _ -> showCons x
+  ScmSymbol a -> a
+  ScmChar a -> show a
+  ScmString s -> "\"" ++ s ++ "\""
+  ScmEmptyList -> "()"
+  ScmPrimitiveFunc _ -> "<primitive>"
+  ScmFunc {params = args, vararg = varargs, body = body, closure = env} ->
+    "(lambda (" ++ unwords (map show args) ++
+    (case varargs of
+        Nothing -> ""
+        Just arg -> " . " ++ arg) ++ ") ...)"
+  
+-- showExp (ScmInt a) = show a
+-- showExp (ScmBool True) = "#t"
+-- showExp (ScmBool False) = "#f"
+-- showExp a@(ScmCons _ _) = showCons a
+-- showExp (ScmSymbol a) = a
+-- showExp (ScmChar a) = show a
+-- showExp (ScmString s) = "\"" ++ s ++ "\""
+-- showExp ScmEmptyList = "()"
+-- showExp (ScmPrimitiveFunc _) = "<primitive>"
 
 -- show simple
 showExp' :: ScmExp -> String
@@ -91,18 +104,15 @@ showExp' (ScmChar a) = "ScmChar " ++ show a
 showExp' (ScmString s) = "ScmString " ++ s
 showExp' ScmEmptyList = "ScmEmptyList"
 
-showCons a = step1 a ""
+showCons a = f a "("
   where
-    step1 x res = step2 x (res ++ "(")
-    step2 x res = step3 x (res ++ showExp (car x))
-    step3 x res = if consp (cdr x)
-                  then
-                    step2 (cdr x) (res ++ " ")
-                  else
-                    step4 x res
-    step4 x res = case (cdr x) of 
-      ScmEmptyList -> res ++ ")"
-      _ -> res ++ " . " ++ showExp (cdr x) ++ ")"
+    f x s = g x (s ++ showExp (car x))
+    g x s = if consp (cdr x) then
+              f (cdr x) (s ++ " ")
+            else
+              case cdr x of 
+                ScmEmptyList -> s ++ ")"
+                _ -> s ++ " . " ++ showExp (cdr x) ++ ")"
 
 -- Error
 data ScmError = ScmNumArgsError Int ScmExp
@@ -153,9 +163,5 @@ type Env = IORef [(String, IORef ScmExp)]
 
 -- nullEnv :: IO Env
 nullEnv = newIORef []
---
-primitiveBindings :: IO Env
-primitiveBindings = undefined
---primitiveBindings = nullEnv >>= 
--- testx :: IO (ScmIOThrowsError ScmExp)
+
 
