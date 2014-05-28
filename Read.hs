@@ -3,7 +3,8 @@
 -- Read.hs - Read S-Expression
 ----------------------------------------------------------------
 module Read (
-  readExp) where       
+  readExp
+  ) where       
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Control.Monad.Error
 import Type
