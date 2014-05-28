@@ -1,3 +1,6 @@
+{- |
+Module      : Type
+-}
 {-# LANGUAGE GADTs, ExistentialQuantification #-}
 module Type (
   ScmExp(..),
@@ -12,20 +15,19 @@ module Type (
   nullEnv,
   ScmIOThrowsError,
   liftThrows,
-  runIOThrows  
+  runIOThrows,
+  extractValue
   ) where
 --ok but warn
 -- import Control.Monad.Error
 -- import Control.Monad.Error.Class 
 
 import Control.Monad.Error
-import Control.Monad.Trans.Except
 
 import Text.ParserCombinators.Parsec
 import Data.IORef
 
--- TODO; check R7RS 7.1.3 
-
+-- |The Scheme data type.TODO; check R7RS 7.1.3 
 data ScmExp = ScmInt Int 
             | ScmBool Bool
             | ScmCons { car :: ScmExp, cdr :: ScmExp }
@@ -48,8 +50,7 @@ instance Eq ScmExp where
   ScmPrimitiveFunc _ == ScmPrimitiveFunc _ = False
   ScmFunc {} == ScmFunc {} = False
 
-instance Show ScmExp where
-  show = showExp
+instance Show ScmExp where show = showExp
 
 infixr 0 `ScmCons`
 
@@ -82,28 +83,8 @@ showExp x = case x of
     (case varargs of
         Nothing -> ""
         Just arg -> " . " ++ arg) ++ ") ...)"
-  
--- showExp (ScmInt a) = show a
--- showExp (ScmBool True) = "#t"
--- showExp (ScmBool False) = "#f"
--- showExp a@(ScmCons _ _) = showCons a
--- showExp (ScmSymbol a) = a
--- showExp (ScmChar a) = show a
--- showExp (ScmString s) = "\"" ++ s ++ "\""
--- showExp ScmEmptyList = "()"
--- showExp (ScmPrimitiveFunc _) = "<primitive>"
-
--- show simple
-showExp' :: ScmExp -> String
-showExp' (ScmInt a) = "ScmInt " ++ show a
-showExp' (ScmBool True) = "#t"
-showExp' (ScmBool False) = "#f"
-showExp' (ScmCons a b) = "ScmCons " ++ showExp' a ++ " " ++ showExp' b
-showExp' (ScmSymbol a) = "ScmSymbol " ++ a
-showExp' (ScmChar a) = "ScmChar " ++ show a
-showExp' (ScmString s) = "ScmString " ++ s
-showExp' ScmEmptyList = "ScmEmptyList"
-
+-- |Show Cons.
+showCons :: ScmExp -> String
 showCons a = f a "("
   where
     f x s = g x (s ++ showExp (car x))
@@ -113,6 +94,16 @@ showCons a = f a "("
               case cdr x of 
                 ScmEmptyList -> s ++ ")"
                 _ -> s ++ " . " ++ showExp (cdr x) ++ ")"
+-- |Show expression simple version.
+showExp' :: ScmExp -> String
+showExp' (ScmInt a) = "ScmInt " ++ show a
+showExp' (ScmBool True) = "#t"
+showExp' (ScmBool False) = "#f"
+showExp' (ScmCons a b) = "ScmCons " ++ showExp' a ++ " " ++ showExp' b
+showExp' (ScmSymbol a) = "ScmSymbol " ++ a
+showExp' (ScmChar a) = "ScmChar " ++ show a
+showExp' (ScmString s) = "ScmString " ++ s
+showExp' ScmEmptyList = "ScmEmptyList"
 
 -- Error
 data ScmError = ScmNumArgsError Int ScmExp
@@ -151,17 +142,20 @@ extractValue (Right val) = val
 
 type ScmIOThrowsError = ErrorT ScmError IO
 
-liftThrows :: MonadError e m => Either e a -> m a
+-- liftThrows :: MonadError e m => Either e a -> m a
+liftThrows :: ThrowsError a -> ScmIOThrowsError a
 liftThrows (Left err) = throwError err
 liftThrows (Right val) = return val
 
-runIOThrows :: Monad m => ErrorT ScmError m String -> m String
+-- runIOThrows :: Monad m => ErrorT ScmError m String -> m String
+--type IOThrowsError = ErrorT ScmError IO
+runIOThrows :: ScmIOThrowsError String -> IO String
 runIOThrows action = runErrorT (trapError action) >>= return . extractValue
 
 -- Environment
 type Env = IORef [(String, IORef ScmExp)]
 
--- nullEnv :: IO Env
+nullEnv :: IO Env
 nullEnv = newIORef []
 
 
