@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Interp (
   eval,
-  evalAndPrint,
+  evalString,
   primitiveBindings
   ) where
 import Type
@@ -43,37 +43,38 @@ defineVar envRef var value = do
     env <- readIORef envRef
     writeIORef envRef ((var, valueRef) : env)
     return value
-    
+
 bindVars :: Env -> [(String, ScmExp)] -> IO Env
 bindVars envRef bindings = 
   readIORef envRef >>= extendEnv bindings >>= newIORef
   where
-    extendEnv bindings env = liftM (++ env) (mapM addBinding bindings)
+    extendEnv bs env = liftM (++ env) (mapM addBinding bs)
     addBinding (var, value) = do
       ref <- newIORef value
       return (var, ref)
 
-evalAndPrint :: Env -> String -> IO ()
-evalAndPrint env e = evalString env e >>= putStrLn
-
+evalString :: Env -> String -> IO String
 evalString env e = 
   runIOThrows $ liftM show $ liftThrows (readExp e) >>= eval env
-
+  
 primitives :: [(String, ScmExp -> ThrowsError ScmExp)]
 primitives = [("+", numericBinOp (+)),
               ("-", numericBinOp (-)),
               ("*", numericBinOp (*)),
-              ("cons", primCons),
-              ("car", primCar),
-              ("cdr", primCdr),
               (">", numBoolBinOp (>)),
               ("<", numBoolBinOp (<)),
               (">=", numBoolBinOp (>=)),
               ("<=", numBoolBinOp (<=)),
-              ("=", numBoolBinOp (==)) 
+              ("=", numBoolBinOp (==)),
+              ("cons", primCons),
+              ("car", primCar),
+              ("cdr", primCdr),
+              ("eq?", eqv)
              ]
 
-eval :: Env -> ScmExp -> ErrorT ScmError IO ScmExp
+-- eval :: Env -> ScmExp -> ErrorT ScmError IO ScmExp
+-- eval :: (MonadError ScmError m, MonadIO m) => Env -> ScmExp -> m ScmExp
+eval :: Env -> ScmExp -> ScmIOThrowsError ScmExp
 eval env x | selfEvaluating x = return x
 eval env (ScmSymbol "quote" `ScmCons` x `ScmCons` ScmEmptyList) = return x
 eval env (ScmSymbol id) = getVar env id
@@ -83,56 +84,77 @@ eval env (ScmSymbol "define" `ScmCons` ScmSymbol var `ScmCons`
 eval env (ScmSymbol "set!" `ScmCons` ScmSymbol var `ScmCons`
             form `ScmCons` ScmEmptyList) =
   eval env form >>= setVar env var
-eval env (ScmSymbol "eq?" `ScmCons` x `ScmCons` y `ScmCons` ScmEmptyList) = do
-  x' <- eval env x
-  y' <- eval env y
-  case eqv x' y' of
-    Right z -> return z
-    Left err -> throwError err
-eval env (ScmSymbol "eq?" `ScmCons` operand) =
-  throwError $ ScmNumArgsError 2 operand
-eval env (ScmSymbol f `ScmCons` operand) = do
-  f' <- eval env (ScmSymbol f)
+
+eval env (ScmSymbol "lambda" `ScmCons` operand) =
+  makeNormalFunc env (toList (car operand)) (cdr operand)
+
+eval env (f `ScmCons` operand) = do
+  f' <- eval env f
   operand' <- evalScmList env operand
   apply f' operand'
 
 -- return length of scheme list.
-lengthScmList x = f x 0
+lengthScmList x = if isProperList x then  
+                    f x 0
+                  else
+                    throwError $ ScmTypeMismatch "list" x
   where
     f ScmEmptyList n = n
     f (x `ScmCons` y) n = f y (n + 1)
 
 -- eval scheme list elements.
-evalScmList env x = f x ScmEmptyList
+evalScmList env x = if isProperList x 
+                    then
+                       f x ScmEmptyList
+                    else 
+                      throwError $ ScmTypeMismatch "list" x
   where
     f ScmEmptyList acc = return $ reverseScmList acc
     f (x `ScmCons` y) acc = do
       x' <- eval env x
       f y (x' `ScmCons` acc)
--- reverse scheme list.
+      
+-- | reverse scheme list.
 reverseScmList x = rev x ScmEmptyList
   where
     rev ScmEmptyList acc = acc
     rev (x `ScmCons` y) acc = rev y (x `ScmCons` acc)
   
+-- (lambda (x y) (+ x y))    
+-- ScmFunc ["x","y"] Nothing (ScmSymbol "+" `ScmCons` ScmSymbol "x" `ScmCons` ScmSymbol "y" `ScmCons` ScmEmptyList
+--     
 apply (ScmPrimitiveFunc f) args = liftThrows $ f args
-
-eqv :: ScmExp -> ScmExp -> ThrowsError ScmExp
-eqv (ScmInt a1) (ScmInt a2) = return $ ScmBool $ a1 == a2
-eqv (ScmBool a1) (ScmBool a2) = return $ ScmBool $ a1 == a2
-eqv (ScmCons a1 b1) (ScmCons a2 b2) = 
-  return $ ScmBool $ a1 `eqv'` a2 && b1 `eqv'` b2
+apply (ScmFunc params vararg body closure) args =
+  liftIO (bindVars closure $ zip params (toList args)) >>= evalBody
   where
-    eqv' x y = case eqv x y of
-      Left err -> False
-      Right (ScmBool val) -> val
-      Right z -> False
-eqv (ScmCons _ _) ScmEmptyList = return $ ScmBool False
-eqv ScmEmptyList (ScmCons _ _) = return $ ScmBool False
-eqv (ScmSymbol a1) (ScmSymbol a2) = return $ ScmBool $ a1 == a2
-eqv (ScmChar a1) (ScmChar a2) = return $ ScmBool $ a1 == a2
-eqv (ScmString a1) (ScmString a2) = return $ ScmBool $ a1 == a2
-eqv ScmEmptyList ScmEmptyList = return $ ScmBool True
+    evalBody env = liftM last $ mapM (eval env) (toList body)
+
+makeNormalFunc env params body = return $ ScmFunc (map showExp params)
+                                 Nothing body env
+
+-- compare
+eqv :: ScmExp -> ThrowsError ScmExp
+eqv (ScmInt a1 `ScmCons` ScmInt a2 `ScmCons` ScmEmptyList) = 
+  return $ ScmBool $ a1 == a2
+eqv (ScmBool a1 `ScmCons` ScmBool a2 `ScmCons` ScmEmptyList) = 
+  return $ ScmBool $ a1 == a2
+eqv (ScmCons a1 b1 `ScmCons` ScmCons a2 b2 `ScmCons` ScmEmptyList) = do
+  ScmBool v1 <- eqv (a1 `ScmCons` a2)
+  ScmBool v2 <- eqv (b1 `ScmCons` b2)
+  return $ ScmBool (v1 && v2)
+eqv (ScmCons _ _ `ScmCons` ScmEmptyList `ScmCons` ScmEmptyList) = 
+  return $ ScmBool False
+eqv (ScmEmptyList `ScmCons` ScmCons _ _ `ScmCons` ScmEmptyList) = 
+  return $ ScmBool False
+eqv (ScmSymbol a1 `ScmCons` ScmSymbol a2 `ScmCons` ScmEmptyList) = 
+  return $ ScmBool $ a1 == a2
+eqv (ScmChar a1 `ScmCons` ScmChar a2 `ScmCons` ScmEmptyList) = 
+  return $ ScmBool $ a1 == a2
+eqv (ScmString a1 `ScmCons` ScmString a2 `ScmCons` ScmEmptyList) = 
+  return $ ScmBool $ a1 == a2
+eqv (ScmEmptyList `ScmCons` ScmEmptyList `ScmCons` ScmEmptyList) = 
+  return $ ScmBool True
+
 --
 --
 -- primitiveBindings :: IO Env
@@ -157,24 +179,19 @@ primCdr args = case args of
     _ -> throwError $ ScmTypeMismatch "cons" x
   _ -> throwError $ ScmNumArgsError 1 args
 
+numericBinOp op args = case args of
+  x `ScmCons` y `ScmCons` ScmEmptyList -> do
+    x' <- unpackNum x
+    y' <- unpackNum y
+    return $ ScmInt (x' `op` y')
+  _ -> throwError $ ScmNumArgsError 2 args
 
-numericBinOp op args = 
-  if lengthScmList args /= 2 then
-    throwError $ ScmNumArgsError 2 args
-  else
-    do
-      x <- unpackNum (car args)
-      y <- unpackNum (car (cdr args))
-      return $ ScmInt (x `op` y)
-      
-numBoolBinOp op args =
-  if lengthScmList args /= 2 then
-    throwError $ ScmNumArgsError 2 args
-  else
-    do
-      x <- unpackNum (car args)
-      y <- unpackNum (car (cdr args))
-      return $ ScmBool (x `op` y)
+numBoolBinOp op args = case args of
+  x `ScmCons` y `ScmCons` ScmEmptyList -> do
+    x' <- unpackNum x
+    y' <- unpackNum y
+    return $ ScmBool (x' `op` y')
+  _ -> throwError $ ScmNumArgsError 2 args
 
 unpackNum :: MonadError ScmError m => ScmExp -> m Int
 unpackNum (ScmInt n) = return n
@@ -187,8 +204,7 @@ isProperList x = case x of
   ScmCons _ b -> isProperList b
   _ -> False
 
--- convert Scheme List into Haskell List
--- TODO; use ScmError;
+-- | convert Scheme List into Haskell List. TODO; use ScmError;
 toList :: ScmExp -> [ScmExp]
 toList x = if isProperList x then
              case x of
